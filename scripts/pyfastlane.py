@@ -11,7 +11,11 @@ import glob
 '''Executes and prints a command'''
 def execute(cmd):
     print(cmd)
-    os.system(cmd)
+    assert(os.system(cmd) == 0)
+
+
+def get_filename_body(full_path):
+    return os.path.splitext(os.path.basename(full_path))[0]
 
 
 class App:
@@ -20,9 +24,14 @@ class App:
         config.read('app.ini')
 
         app = config['app']
-        self.workspace = app['workspace']
+        try:
+            self.workspace = app['workspace']
+        except:
+            self.workspace = None
         self.project = app['project']
+        self.project_dir = os.path.dirname(self.project)
         self.scheme = app['scheme']
+        self.temp_dir_name = get_filename_body(self.project) + '-' + self.scheme
         self.uses_encryption = app.get('uses encryption', False)
         self.uses_idfa = app.get('uses idfa', False)
 
@@ -30,9 +39,13 @@ class App:
         self.connect_username = connect['username']
         self.connect_team_name = connect['team_name']
 
-        screenshots = config['screenshots']
-        self.screenshot_languages = [x.strip() for x in screenshots['languages'].split(',')]
-        self.screenshot_devices = [x.strip() for x in screenshots['devices'].split(',')]
+        try:
+            screenshots = config['screenshots']
+            self.screenshot_languages = [x.strip() for x in screenshots['languages'].split(',')]
+            self.screenshot_devices = [x.strip() for x in screenshots['devices'].split(',')]
+        except KeyError:
+            self.screenshot_languages = []
+            self.screenshot_devices = []
 
         submission_information_string = json.dumps({
             'export_compliance_uses_encryption': self.uses_encryption,
@@ -46,7 +59,7 @@ class App:
             'increment_patch_number': self.increment_patch_number,
             'increment_minor_version': self.increment_minor_version,
             'increment_major_version': self.increment_major_version,
-            'build': self.build,
+            'build': self.build_ipa,
             'upload_binary': self.upload_binary,
             'upload_metadata': self.upload_metadata,
             'upload_screenshots': self.upload_screenshots,
@@ -67,6 +80,8 @@ class App:
             print(f'Unknown action "{action_name}"')
             self.help()
 
+    def increment_version_number(self):
+        execute(f'agvtool ')
 
     def increment_build_number(self):
         '''Increments the build number of the project'''
@@ -88,9 +103,19 @@ class App:
         execute(f'fastlane run increment_version_number bump_type:major xcodeproj:"{self.project}"')
 
 
-    def build(self):
+    def build_ipa(self):
         '''Builds the .ipa file'''
-        execute(f'fastlane gym --workspace {self.workspace} --scheme {self.scheme}')
+        if self.workspace is not None:
+            workspaceParam = f'--workspace {self.workspace}'
+        else:
+            workspaceParam = ''
+
+        execute(f'fastlane gym {workspaceParam} --scheme "{self.scheme}"')
+        #
+        # derived_data_dir = os.path.join(os.getenv('HOME'), '.cache/pyfastlane/', self.temp_dir_name)
+        # os.makedirs(derived_data_dir, exist_ok=True)
+        #
+        # execute(f'xcodebuild -workspace {self.workspace} -scheme {self.scheme} -derivedDataPath {derived_data_dir} -destination \'generic/platform=iOS\' build')
 
 
     def upload_binary(self):
@@ -116,7 +141,7 @@ class App:
     def testflight(self):
         '''Increments build number, builds the .ipa file, then uploads the .ipa file to TestFlight'''
         self.increment_build_number()
-        self.build()
+        self.build_ipa()
         self.upload_binary()
 
 
@@ -128,19 +153,25 @@ class App:
     def release(self):
         '''Increments build number, builds the .ipa file, uploads the metadata and .ipa file, and submits for release on App Store Connect'''
         self.increment_build_number()
-        self.build()
+        self.build_ipa()
         execute(f'fastlane deliver {self.deliver_options} --submit_for_review --skip_screenshots')
 
     def snapshot(self):
         '''Capture screenshots using Snapshot'''
         deviceList = ",".join(self.screenshot_devices)
 
-        derived_data_dir = 'DerivedData'
+        derived_data_dir = os.path.join(os.getenv('HOME'), '.cache/pyfastlane/', self.temp_dir_name)
         os.makedirs(derived_data_dir, exist_ok=True)
 
         # Build the app bundle once
         device = self.screenshot_devices[0]
-        execute(f'xcodebuild -workspace {self.workspace} -scheme {self.scheme} -derivedDataPath {derived_data_dir} -destination "platform=iOS Simulator,name={device},OS=14.2" FASTLANE_SNAPSHOT=YES FASTLANE_LANGUAGE=en-US build-for-testing')
+
+        if self.workspace is not None:
+            workspaceParam = f'-workspace {self.workspace}'
+        else:
+            workspaceParam = ''
+
+        execute(f'xcodebuild {workspaceParam} -scheme "{self.scheme}" -derivedDataPath {derived_data_dir} -destination "platform=iOS Simulator,name={device},OS=14.2" FASTLANE_SNAPSHOT=YES FASTLANE_LANGUAGE=en-US build-for-testing')
 
         for device in self.screenshot_devices:
             for language in self.screenshot_languages:
@@ -152,7 +183,12 @@ class App:
                 if language == 'no':
                     language = 'no-NO'
 
-                execute(f'nice -n 20 fastlane run snapshot workspace:"{self.workspace}" scheme:"{self.scheme}" devices:"{device}" languages:"{language}" test_without_building:true derived_data_path:"{derived_data_dir}"')
+                if self.workspace is not None:
+                    workspaceParam = f'workspace:"{self.workspace}"'
+                else:
+                    workspaceParam = ''
+
+                execute(f'nice -n 20 fastlane run snapshot {workspaceParam} scheme:"{self.scheme}" devices:"{device}" languages:"{language}" test_without_building:true derived_data_path:"{derived_data_dir}"')
 
                 # Sigh, we need to move "no-NO" to "no"
                 if language == 'no-NO':
