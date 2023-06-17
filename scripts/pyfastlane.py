@@ -14,7 +14,7 @@ import logging
 def execute(cmd):
     output_filename = 'command.log'
     logging.info(cmd)
-    result = os.system(f'{cmd} > {output_filename}')
+    result = os.system(f'{cmd} > {output_filename} 2>&1')
     if result != 0:
         logging.error(f'Command failed: {cmd}')
         logging.error(f'Exit code: {result}')
