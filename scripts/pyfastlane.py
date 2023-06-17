@@ -1,17 +1,25 @@
 #!/usr/bin/env python3
 
 import configparser
-import sys
 import os
 import json
-import tempfile
 import glob
+import argparse
+import os.path
+import subprocess
+import logging
 
 
 '''Executes and prints a command'''
 def execute(cmd):
-    print(cmd)
-    assert(os.system(cmd) == 0)
+    output_filename = 'command.log'
+    logging.info(cmd)
+    result = os.system(f'{cmd} > {output_filename}')
+    if result != 0:
+        logging.error(f'Command failed: {cmd}')
+        logging.error(f'Exit code: {result}')
+        logging.error(f'Output is in file {output_filename}')
+        exit(1)
 
 
 def get_filename_body(full_path):
@@ -19,9 +27,13 @@ def get_filename_body(full_path):
 
 
 class App:
-    def __init__(self):
+    def __init__(self, path: str):
         config = configparser.ConfigParser()
-        config.read('app.ini')
+        iniPath = os.path.join(path, 'app.ini')
+        successfullyReadFilenames = config.read(iniPath)
+        if len(successfullyReadFilenames) < 1:
+            logging.error(f'Cannot read: {iniPath}')
+            exit(1)
 
         app = config['app']
         try:
@@ -77,15 +89,26 @@ class App:
             action = self.actions[action_name]
             action()
         except KeyError:
-            print(f'Unknown action "{action_name}"')
+            logging.error(f'Unknown action "{action_name}"')
             self.help()
 
-    def increment_version_number(self):
-        execute(f'agvtool ')
+    def _get_version_number(self):
+        cmd = 'agvtool what-marketing-version -terse'.split()
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+        for lineBytes in proc.stdout:
+            line = lineBytes.decode()
+            version_string = line[line.rfind('=') + 1:].strip()
+            return version_string
+
+
+    def tag_commit(self, tag_name: str):
+        logging.info(f'Tagging commit as {tag_name}')
+        execute(f'git tag -f {tag_name}')
+
 
     def increment_build_number(self):
         '''Increments the build number of the project'''
-        execute(f'fastlane run increment_build_number xcodeproj:"{self.project}"')
+        execute(f'agvtool next-version -all')
 
 
     def increment_patch_number(self):
@@ -121,21 +144,25 @@ class App:
     def upload_binary(self):
         '''Uploads the .ipa file to App Store Connect'''
         execute(f'fastlane deliver {self.deliver_options} --skip_screenshots --skip_metadata')
+        self.tag_commit(self._get_version_number())
 
 
     def upload_metadata(self):
         '''Uploads the metadata to App Store Connect'''
         execute(f'fastlane deliver {self.deliver_options} --skip_binary_upload --skip_screenshots')
+        self.tag_commit(self._get_version_number())
 
 
     def upload_screenshots(self):
         '''Uploads screenshots to App Store Connect'''
         execute(f'fastlane deliver {self.deliver_options} --skip_binary_upload --skip_metadata --force')
+        self.tag_commit(self._get_version_number())
 
 
     def replace_screenshots(self):
         '''Replace all screenshots to App Store Connect'''
         execute(f'fastlane deliver {self.deliver_options} --skip_binary_upload --skip_metadata --force --overwrite_screenshots')
+        self.tag_commit(self._get_version_number())
 
 
     def testflight(self):
@@ -155,6 +182,7 @@ class App:
         self.increment_build_number()
         self.build_ipa()
         execute(f'fastlane deliver {self.deliver_options} --submit_for_review --skip_screenshots')
+        self.tag_commit(self._get_version_number())
 
     def snapshot(self):
         '''Capture screenshots using Snapshot'''
@@ -177,7 +205,7 @@ class App:
             for language in self.screenshot_languages:
                 # Skip if we already have >4 screenshots in this directory
                 if len(glob.glob(f'fastlane/screenshots/{language}/{device}*')) > 4:
-                    print(f'Skipped {device:40}    {language:6}')
+                    logging.warning(f'Skipped {device:40}    {language:6}')
                     continue
 
                 if language == 'no':
@@ -206,11 +234,25 @@ class App:
 
 # Main
 
-app = App()
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Publish apps to App Store Connect')
+    parser.add_argument('path', help='Path to directory containing the app.ini file')
+    parser.add_argument('actions', nargs='*', help='Action(s) to take')
+    parser.add_argument('-d', type=bool, dest='debug', help='Log more for debugging purposes')
+    args = parser.parse_args()
 
-actions = sys.argv[1:]
-if len(actions) == 0:
-    actions  = ['help']
+    # Setup logging
+    log_format = '%(asctime)s %(levelname)8s %(message)s'
+    if args.debug:
+        logging.basicConfig(level=logging.DEBUG, format=log_format)
+    else:
+        logging.basicConfig(level=logging.INFO, format=log_format)
 
-for action in actions:
-    app.doAction(action)
+    app = App(args.path)
+
+    actions = args.actions
+    if len(actions) == 0:
+        actions  = ['help']
+
+    for action in actions:
+        app.doAction(action)
