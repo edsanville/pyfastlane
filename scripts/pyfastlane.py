@@ -11,10 +11,12 @@ import logging
 
 
 '''Executes and prints a command'''
-def execute(cmd):
+def execute(cmd, silent=True):
     output_filename = 'command.log'
     logging.info(cmd)
-    result = os.system(f'{cmd} > {output_filename} 2>&1')
+    if silent:
+        cmd += f' > {output_filename} 2>&1'
+    result = os.system(cmd)
     if result != 0:
         logging.error(f'Command failed: {cmd}')
         logging.error(f'Exit code: {result}')
@@ -43,6 +45,7 @@ def get_filename_body(full_path):
 
 class App:
     def __init__(self, path: str):
+        self.path = path
         config = configparser.ConfigParser()
         iniPath = os.path.join(path, 'app.ini')
         successfullyReadFilenames = config.read(iniPath)
@@ -79,7 +82,7 @@ class App:
             'add_id_info_uses_idfa': self.uses_idfa
         })
 
-        self.deliver_options = f'--force --run_precheck_before_submit false --username {self.connect_username} --team_name "{self.connect_team_name}" --submission_information \'{submission_information_string}\''
+        self.deliver_options = f'--force --run_precheck_before_submit false --username {self.connect_username} --team_name "{self.connect_team_name}" --submission_information \'{submission_information_string}\' --metadata_path \'{self.path}/fastlane/metadata\''
 
         self.actions = {
             'increment_build_number': self.increment_build_number,
@@ -171,7 +174,7 @@ class App:
 
     def upload_metadata(self):
         '''Uploads the metadata to App Store Connect'''
-        execute(f'fastlane deliver {self.deliver_options} --skip_binary_upload --skip_screenshots')
+        execute(f'fastlane deliver {self.deliver_options} --skip_binary_upload --skip_screenshots', silent=False)
         self.tag_commit(self._get_version_number())
 
 
@@ -197,7 +200,7 @@ class App:
 
     def submit(self):
         '''Submits the latest build for the latest version number on App Store Connect'''
-        execute(f'fastlane deliver submit_build {self.deliver_options} --skip_screenshots --skip_metadata')
+        execute(f'fastlane deliver submit_build {self.deliver_options} --skip_screenshots --skip_metadata', silent=False)
 
 
     def release(self):
