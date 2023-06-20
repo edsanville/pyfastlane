@@ -22,6 +22,21 @@ def execute(cmd):
         exit(1)
 
 
+def git_is_clean():
+    cmd = 'git status --porcelain'
+    logging.info(cmd)
+    try:
+        proc = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE)
+        return len(proc.stdout.readlines()) == 0
+    except FileNotFoundError as e:
+        logging.error(e)
+        exit(1)
+
+
+def git_commit(msg):
+    execute(f'git commit -a -m "{msg}"')
+
+
 def get_filename_body(full_path):
     return os.path.splitext(os.path.basename(full_path))[0]
 
@@ -101,6 +116,12 @@ class App:
             return version_string
 
 
+    def ensure_git_clean(self):
+        if not git_is_clean():
+            logging.error('Dirty directory:  uncommitted git changes!')
+            exit(1)
+
+
     def tag_commit(self, tag_name: str):
         logging.info(f'Tagging commit as {tag_name}')
         execute(f'git tag -f {tag_name}')
@@ -109,6 +130,7 @@ class App:
     def increment_build_number(self):
         '''Increments the build number of the project'''
         execute(f'agvtool next-version -all')
+        git_commit('Bump version number')
 
 
     def increment_patch_number(self):
@@ -167,6 +189,7 @@ class App:
 
     def testflight(self):
         '''Increments build number, builds the .ipa file, then uploads the .ipa file to TestFlight'''
+        self.ensure_git_clean()
         self.increment_build_number()
         self.build_ipa()
         self.upload_binary()
