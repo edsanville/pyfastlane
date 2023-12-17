@@ -9,6 +9,12 @@ import os.path
 import subprocess
 import logging
 
+import appPublish
+import appstoreconnect
+
+from munch import DefaultMunch
+from pprint import pprint
+from functools import *
 
 '''Executes and prints a command'''
 def execute(cmd, silent=True):
@@ -44,47 +50,39 @@ def get_filename_body(full_path):
 
 
 class App:
+    config: appPublish.Config
+
     def __init__(self, path: str):
         self.path = path
-        config = configparser.ConfigParser()
+        parser = configparser.ConfigParser()
         iniPath = os.path.join(path, 'app.ini')
-        successfullyReadFilenames = config.read(iniPath)
+        successfullyReadFilenames = parser.read(iniPath)
         if len(successfullyReadFilenames) < 1:
             logging.error(f'Cannot read: {iniPath}')
             exit(1)
 
-        app = config['app']
-        try:
-            self.workspace = app['workspace']
-        except:
-            self.workspace = None
-        self.project = app['project']
-        self.project_dir = os.path.dirname(self.project)
-        self.scheme = app['scheme']
-        self.temp_dir_name = get_filename_body(self.project) + '-' + self.scheme
-        self.uses_encryption = app.get('uses encryption', False)
-        self.uses_idfa = app.get('uses idfa', False)
+        config: appPublish.Config = DefaultMunch.fromDict(dict(parser))
+        self.config = config
 
-        connect = config['connect']
-        self.connect_username = connect['username']
-        self.connect_team_name = connect['team_name']
+        self.config.project_dir = os.path.dirname(self.config.app.project)
+        self.temp_dir_name = get_filename_body(self.config.app.project) + '-' + self.config.app.scheme
 
         try:
-            screenshots = config['screenshots']
-            self.screenshot_languages = [x.strip() for x in screenshots['languages'].split(',')]
-            self.screenshot_devices = [x.strip() for x in screenshots['devices'].split(',')]
+            self.screenshot_languages = [x.strip() for x in config.screenshots.languages.split(',')]
+            self.screenshot_devices = [x.strip() for x in config.screenshots.devices.split(',')]
         except KeyError:
             self.screenshot_languages = []
             self.screenshot_devices = []
 
         submission_information_string = json.dumps({
-            'export_compliance_uses_encryption': self.uses_encryption,
-            'add_id_info_uses_idfa': self.uses_idfa
+            'export_compliance_uses_encryption': self.config.app.uses_encryption,
+            'add_id_info_uses_idfa': self.config.app.uses_idfa
         })
 
-        self.deliver_options = f'--force --run_precheck_before_submit false --username {self.connect_username} --team_name "{self.connect_team_name}" --submission_information \'{submission_information_string}\' --metadata_path \'{self.path}/fastlane/metadata\''
+        self.deliver_options = f'--force --run_precheck_before_submit false --username {self.config.connect.username} --team_name "{self.config.connect.team_name}" --submission_information \'{submission_information_string}\' --metadata_path \'{self.path}/fastlane/metadata\''
 
         self.actions = {
+            'versions': self.show_version_information,
             'increment_build_number': self.increment_build_number,
             'increment_patch_number': self.increment_patch_number,
             'increment_minor_version': self.increment_minor_version,
@@ -130,6 +128,25 @@ class App:
         execute(f'git tag -f {tag_name}')
 
 
+    def show_version_information(self):
+        '''Shows version information from App Store Connect'''
+        session = appstoreconnect.Session()
+        latest_build: appstoreconnect.Build = None
+
+        builds = session.get_builds(self.config.app.app_id)
+        try:
+            latest_build = max(builds, key=lambda b: b.attributes.uploadedDate)
+            print(f'App Store Build: {latest_build.attributes.version:10s} ({latest_build.attributes.uploadedDate})')
+        except:
+            print('No App Store builds uploaded yet')
+        
+        versions = session.get_appStoreVersions(self.config.app.app_id)
+        try:
+            latest_version = max(versions, key=lambda version: version.attributes.createdDate)
+            print(f'App Store Version: {latest_version.attributes.versionString:10s} ({latest_version.attributes.createdDate})')
+        except ValueError:
+            print('No App Store versions')
+
     def increment_build_number(self):
         '''Increments the build number of the project'''
         execute(f'agvtool next-version -all')
@@ -138,32 +155,32 @@ class App:
 
     def increment_patch_number(self):
         '''Increments the patch number of the project (e.g. 3.2.x)'''
-        execute(f'fastlane run increment_version_number bump_type:patch xcodeproj:"{self.project}"')
+        execute(f'fastlane run increment_version_number bump_type:patch xcodeproj:"{self.config.app.project}"')
 
 
     def increment_minor_version(self):
         '''Increments the minor version of the project (e.g. 3.x.1)'''
-        execute(f'fastlane run increment_version_number bump_type:minor xcodeproj:"{self.project}"')
+        execute(f'fastlane run increment_version_number bump_type:minor xcodeproj:"{self.config.app.project}"')
 
 
     def increment_major_version(self):
         '''Increments the major version of the project (e.g. x.2.1)'''
-        execute(f'fastlane run increment_version_number bump_type:major xcodeproj:"{self.project}"')
+        execute(f'fastlane run increment_version_number bump_type:major xcodeproj:"{self.config.app.project}"')
 
 
     def build_ipa(self):
         '''Builds the .ipa file'''
-        if self.workspace is not None:
-            workspaceParam = f'--workspace {self.workspace}'
+        if self.config.app.workspace is not None:
+            workspaceParam = f'--workspace {self.config.app.workspace}'
         else:
             workspaceParam = ''
 
-        execute(f'fastlane gym {workspaceParam} --scheme "{self.scheme}"')
+        execute(f'fastlane gym {workspaceParam} --scheme "{self.config.app.scheme}"')
         #
         # derived_data_dir = os.path.join(os.getenv('HOME'), '.cache/pyfastlane/', self.temp_dir_name)
         # os.makedirs(derived_data_dir, exist_ok=True)
         #
-        # execute(f'xcodebuild -workspace {self.workspace} -scheme {self.scheme} -derivedDataPath {derived_data_dir} -destination \'generic/platform=iOS\' build')
+        # execute(f'xcodebuild -workspace {self.config.app.workspace} -scheme {self.config.app.scheme} -derivedDataPath {derived_data_dir} -destination \'generic/platform=iOS\' build')
 
 
     def upload_binary(self):
@@ -220,12 +237,12 @@ class App:
         # Build the app bundle once
         device = self.screenshot_devices[0]
 
-        if self.workspace is not None:
-            workspaceParam = f'-workspace {self.workspace}'
+        if self.config.app.workspace is not None:
+            workspaceParam = f'-workspace {self.config.app.workspace}'
         else:
             workspaceParam = ''
 
-        execute(f'xcodebuild {workspaceParam} -scheme "{self.scheme}" -derivedDataPath {derived_data_dir} -destination "platform=iOS Simulator,name={device},OS=14.2" FASTLANE_SNAPSHOT=YES FASTLANE_LANGUAGE=en-US build-for-testing')
+        execute(f'xcodebuild {workspaceParam} -scheme "{self.config.app.scheme}" -derivedDataPath {derived_data_dir} -destination "platform=iOS Simulator,name={device},OS=14.2" FASTLANE_SNAPSHOT=YES FASTLANE_LANGUAGE=en-US build-for-testing')
 
         for device in self.screenshot_devices:
             for language in self.screenshot_languages:
@@ -237,12 +254,12 @@ class App:
                 if language == 'no':
                     language = 'no-NO'
 
-                if self.workspace is not None:
-                    workspaceParam = f'workspace:"{self.workspace}"'
+                if self.config.app.workspace is not None:
+                    workspaceParam = f'workspace:"{self.config.app.workspace}"'
                 else:
                     workspaceParam = ''
 
-                execute(f'nice -n 20 fastlane run snapshot {workspaceParam} scheme:"{self.scheme}" devices:"{device}" languages:"{language}" test_without_building:true derived_data_path:"{derived_data_dir}"')
+                execute(f'nice -n 20 fastlane run snapshot {workspaceParam} scheme:"{self.config.app.scheme}" devices:"{device}" languages:"{language}" test_without_building:true derived_data_path:"{derived_data_dir}"')
 
                 # Sigh, we need to move "no-NO" to "no"
                 if language == 'no-NO':

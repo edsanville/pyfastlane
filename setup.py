@@ -10,7 +10,7 @@ setup(name='pyfastlane',
       scripts=[
             'scripts/pyfastlane.py',
       ],
-      packages=['pyfastlane'],
+      packages=['appPublish'],
       install_requires=[
       ],
       zip_safe=False)
