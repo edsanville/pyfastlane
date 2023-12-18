@@ -8,6 +8,7 @@ import argparse
 import os.path
 import subprocess
 import logging
+import pytz
 
 import appPublish
 import appstoreconnect
@@ -15,6 +16,7 @@ import appstoreconnect
 from munch import DefaultMunch
 from pprint import pprint
 from functools import *
+from datetime import datetime
 
 '''Executes and prints a command'''
 def execute(cmd, silent=True):
@@ -116,6 +118,13 @@ class App:
             version_string = line[line.rfind('=') + 1:].strip()
             return version_string
 
+    def _get_build_number(self):
+        cmd = 'agvtool what-version -terse'.split()
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+        for lineBytes in proc.stdout:
+            version_string = lineBytes.decode().strip()
+            return version_string
+
 
     def ensure_git_clean(self):
         if not git_is_clean():
@@ -129,23 +138,38 @@ class App:
 
 
     def show_version_information(self):
-        '''Shows version information from App Store Connect'''
+        '''Shows version information from the project and from App Store Connect'''
+        def localTimeString(isoString: str):
+            DATE_FORMAT = '%Y-%m-%d %H:%M:%S %Z'
+            return datetime.fromisoformat(isoString).astimezone().strftime(DATE_FORMAT)
+
         session = appstoreconnect.Session()
         latest_build: appstoreconnect.Build = None
+
+        print(f'{"":15s} {"Version":12s} {"Date":25s} {"Build":12s} {"Date":25s}')
+
+        print(f'{"Project":15s} {self._get_version_number():12s} {"":25s} {self._get_build_number():12s}')
 
         builds = session.get_builds(self.config.app.app_id)
         try:
             latest_build = max(builds, key=lambda b: b.attributes.uploadedDate)
-            print(f'App Store Build: {latest_build.attributes.version:10s} ({latest_build.attributes.uploadedDate})')
+            app_store_build = latest_build.attributes.version
+            app_store_build_date = localTimeString(latest_build.attributes.uploadedDate)
         except:
-            print('No App Store builds uploaded yet')
-        
+            app_store_build = 'None'
+            app_store_build_date = ''
+
         versions = session.get_appStoreVersions(self.config.app.app_id)
         try:
             latest_version = max(versions, key=lambda version: version.attributes.createdDate)
-            print(f'App Store Version: {latest_version.attributes.versionString:10s} ({latest_version.attributes.createdDate})')
+            app_store_version = latest_version.attributes.versionString
+            app_store_version_date = localTimeString(latest_version.attributes.createdDate)
         except ValueError:
-            print('No App Store versions')
+            app_store_version = 'None'
+            app_store_version_date = ''
+
+        print(f'{"App Store":15s} {app_store_version:12s} {app_store_version_date:25s} {app_store_build:12s} {app_store_build_date:25s}')
+        
 
     def increment_build_number(self):
         '''Increments the build number of the project'''
