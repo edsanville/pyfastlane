@@ -77,8 +77,8 @@ class App:
             self.screenshot_devices = []
 
         submission_information_string = json.dumps({
-            'export_compliance_uses_encryption': self.config.app.uses_encryption,
-            'add_id_info_uses_idfa': self.config.app.uses_idfa
+            'export_compliance_uses_encryption': self.config.app.uses_encryption or False,
+            'add_id_info_uses_idfa': self.config.app.uses_idfa or False
         })
 
         self.deliver_options = f'--force --run_precheck_before_submit false --username {self.config.connect.username} --team_name "{self.config.connect.team_name}" --submission_information \'{submission_information_string}\' --metadata_path \'{self.path}/fastlane/metadata\''
