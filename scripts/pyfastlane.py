@@ -81,7 +81,17 @@ class App:
             'add_id_info_uses_idfa': self.config.app.uses_idfa or False
         })
 
-        self.deliver_options = f'--force --run_precheck_before_submit false --username {self.config.connect.username} --team_name "{self.config.connect.team_name}" --submission_information \'{submission_information_string}\' --metadata_path \'{self.path}/fastlane/metadata\''
+        deliver_options = [
+            '--force',
+            '--run_precheck_before_submit false',
+            f'--username {self.config.connect.username}',
+            f'--team_name "{self.config.connect.team_name}"',
+            f'--submission_information \'{submission_information_string}\'',
+            f'--metadata_path \'{self.path}/fastlane/metadata\'',
+            f'--app_identifier {self.config.app.bundle_id}'
+        ]
+
+        self.deliver_options = ' '.join(deliver_options)
 
         self.actions = {
             'versions': self.show_version_information,

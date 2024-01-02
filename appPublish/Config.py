@@ -7,6 +7,7 @@ class AppConfig:
     project: str
     scheme: str
     app_id: int
+    bundle_id: str
 
 
 @dataclass
