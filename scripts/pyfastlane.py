@@ -18,6 +18,8 @@ from pprint import pprint
 from functools import *
 from datetime import datetime
 
+fastlaneCommand = 'bundle exec fastlane'
+
 '''Executes and prints a command'''
 def execute(cmd, silent=True):
     output_filename = 'command.log'
@@ -189,17 +191,17 @@ class App:
 
     def increment_patch_number(self):
         '''Increments the patch number of the project (e.g. 3.2.x)'''
-        execute(f'fastlane run increment_version_number bump_type:patch xcodeproj:"{self.config.app.project}"')
+        execute(f'{fastlaneCommand} run increment_version_number bump_type:patch xcodeproj:"{self.config.app.project}"')
 
 
     def increment_minor_version(self):
         '''Increments the minor version of the project (e.g. 3.x.1)'''
-        execute(f'fastlane run increment_version_number bump_type:minor xcodeproj:"{self.config.app.project}"')
+        execute(f'{fastlaneCommand} run increment_version_number bump_type:minor xcodeproj:"{self.config.app.project}"')
 
 
     def increment_major_version(self):
         '''Increments the major version of the project (e.g. x.2.1)'''
-        execute(f'fastlane run increment_version_number bump_type:major xcodeproj:"{self.config.app.project}"')
+        execute(f'{fastlaneCommand} run increment_version_number bump_type:major xcodeproj:"{self.config.app.project}"')
 
 
     def build_ipa(self):
@@ -209,7 +211,7 @@ class App:
         else:
             workspaceParam = ''
 
-        execute(f'fastlane gym {workspaceParam} --scheme "{self.config.app.scheme}"')
+        execute(f'{fastlaneCommand} gym {workspaceParam} --scheme "{self.config.app.scheme}"')
         #
         # derived_data_dir = os.path.join(os.getenv('HOME'), '.cache/pyfastlane/', self.temp_dir_name)
         # os.makedirs(derived_data_dir, exist_ok=True)
@@ -219,25 +221,25 @@ class App:
 
     def upload_binary(self):
         '''Uploads the .ipa file to App Store Connect'''
-        execute(f'fastlane deliver {self.deliver_options} --skip_screenshots --skip_metadata')
+        execute(f'{fastlaneCommand} deliver {self.deliver_options} --skip_screenshots --skip_metadata')
         self.tag_commit(self._get_version_number())
 
 
     def upload_metadata(self):
         '''Uploads the metadata to App Store Connect'''
-        execute(f'fastlane deliver {self.deliver_options} --skip_binary_upload --skip_screenshots', silent=False)
+        execute(f'{fastlaneCommand} deliver {self.deliver_options} --skip_binary_upload --skip_screenshots', silent=False)
         self.tag_commit(self._get_version_number())
 
 
     def upload_screenshots(self):
         '''Uploads screenshots to App Store Connect'''
-        execute(f'fastlane deliver {self.deliver_options} --skip_binary_upload --skip_metadata --force')
+        execute(f'{fastlaneCommand} deliver {self.deliver_options} --skip_binary_upload --skip_metadata --force')
         self.tag_commit(self._get_version_number())
 
 
     def replace_screenshots(self):
         '''Replace all screenshots to App Store Connect'''
-        execute(f'fastlane deliver {self.deliver_options} --skip_binary_upload --skip_metadata --force --overwrite_screenshots')
+        execute(f'{fastlaneCommand} deliver {self.deliver_options} --skip_binary_upload --skip_metadata --force --overwrite_screenshots')
         self.tag_commit(self._get_version_number())
 
 
@@ -251,14 +253,14 @@ class App:
 
     def submit(self):
         '''Submits the latest build for the latest version number on App Store Connect'''
-        execute(f'fastlane deliver submit_build {self.deliver_options} --skip_screenshots --skip_metadata', silent=False)
+        execute(f'{fastlaneCommand} deliver submit_build {self.deliver_options} --skip_screenshots --skip_metadata', silent=False)
 
 
     def release(self):
         '''Increments build number, builds the .ipa file, uploads the metadata and .ipa file, and submits for release on App Store Connect'''
         self.increment_build_number()
         self.build_ipa()
-        execute(f'fastlane deliver {self.deliver_options} --submit_for_review --skip_screenshots')
+        execute(f'{fastlaneCommand} deliver {self.deliver_options} --submit_for_review --skip_screenshots')
         self.tag_commit(self._get_version_number())
 
     def snapshot(self):
@@ -281,7 +283,7 @@ class App:
         for device in self.screenshot_devices:
             for language in self.screenshot_languages:
                 # Skip if we already have >4 screenshots in this directory
-                if len(glob.glob(f'fastlane/screenshots/{language}/{device}*')) > 4:
+                if len(glob.glob(f'{fastlaneCommand}/screenshots/{language}/{device}*')) > 4:
                     logging.warning(f'Skipped {device:40}    {language:6}')
                     continue
 
