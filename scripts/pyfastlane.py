@@ -17,6 +17,7 @@ from munch import DefaultMunch
 from pprint import pprint
 from functools import *
 from datetime import datetime
+from dataclasses import *
 
 fastlaneCommand = 'bundle exec fastlane'
 
@@ -53,8 +54,45 @@ def get_filename_body(full_path):
     return os.path.splitext(os.path.basename(full_path))[0]
 
 
+@dataclass
+class SemanticVersion:
+    major: int
+    minor: int
+    patch: int
+
+    @staticmethod
+    def fromString(string: str):
+        parts = string.split('.')
+        return SemanticVersion(*parts)
+    
+    def __lt__(self, other: "SemanticVersion") -> bool:
+        if self.major < other.major:
+            return True
+        if self.major > other.major:
+            return False
+        
+        if self.minor < other.minor:
+            return True
+        if self.major > other.major:
+            return False
+        
+        return self.patch < other.patch
+    
+    def __eq__(self, other: "SemanticVersion") -> bool:
+        return self.major == other.major and self.minor == other.minor and self.patch == other.patch
+    
+    def __gt__(self, other: "SemanticVersion") -> bool:
+        return not (self < other or self == other)
+
+    def __le__(self, other: "SemanticVersion") -> bool:
+        return self < other or self == other
+    
+    def __str__(self):
+        return f'{self.major}.{self.minor}.{self.patch}'
+
 class App:
     config: appPublish.Config
+    session: appstoreconnect.Session
 
     def __init__(self, path: str):
         self.path = path
@@ -97,10 +135,7 @@ class App:
 
         self.actions = {
             'versions': self.show_version_information,
-            'increment_build_number': self.increment_build_number,
-            'increment_patch_number': self.increment_patch_number,
-            'increment_minor_version': self.increment_minor_version,
-            'increment_major_version': self.increment_major_version,
+            'version_check': self.version_check,
             'build': self.build_ipa,
             'upload_binary': self.upload_binary,
             'upload_metadata': self.upload_metadata,
@@ -112,6 +147,8 @@ class App:
             'snapshot': self.snapshot,
             'help': self.help
         }
+
+        self.session = appstoreconnect.Session()
 
 
     def doAction(self, action_name):
@@ -149,6 +186,22 @@ class App:
         execute(f'git tag -f {tag_name}')
 
 
+    def getLatestBuild(self):
+        builds = self.session.get_builds(self.config.app.app_id)
+        try:
+            return max(builds, key=lambda b: b.attributes.uploadedDate)
+        except:
+            return None
+
+
+    def getLatestVersion(self):
+        versions = self.session.get_appStoreVersions(self.config.app.app_id)
+        try:
+            return max(versions, key=lambda version: version.attributes.createdDate)
+        except:
+            return None
+
+
     def show_version_information(self):
         '''Shows version information from the project and from App Store Connect'''
         def localTimeString(isoString: str):
@@ -162,46 +215,60 @@ class App:
 
         print(f'{"Project":15s} {self._get_version_number():12s} {"":25s} {self._get_build_number():12s}')
 
-        builds = session.get_builds(self.config.app.app_id)
-        try:
-            latest_build = max(builds, key=lambda b: b.attributes.uploadedDate)
+        latest_build = self.getLatestBuild()
+        if latest_build:
             app_store_build = latest_build.attributes.version
             app_store_build_date = localTimeString(latest_build.attributes.uploadedDate)
-        except:
+        else:
             app_store_build = 'None'
             app_store_build_date = ''
 
-        versions = session.get_appStoreVersions(self.config.app.app_id)
-        try:
-            latest_version = max(versions, key=lambda version: version.attributes.createdDate)
+        latest_version = self.getLatestVersion()
+        if latest_version:
             app_store_version = latest_version.attributes.versionString
             app_store_version_date = localTimeString(latest_version.attributes.createdDate)
-        except ValueError:
+        else:
             app_store_version = 'None'
             app_store_version_date = ''
 
         print(f'{"App Store":15s} {app_store_version:12s} {app_store_version_date:25s} {app_store_build:12s} {app_store_build_date:25s}')
         
 
-    def increment_build_number(self):
-        '''Increments the build number of the project'''
-        execute(f'agvtool next-version -all')
-        git_commit('Bump version number')
+    def version_check(self):
+        '''Checks to make sure the project's version settings are up-to-date'''
+        logging.info('Checking App Store build...')
+        latest_build = self.getLatestBuild()
+        if latest_build:
+            new_build = int(latest_build.attributes.version) + 1
+            logging.info(f'App Store build is {latest_build.attributes.version}, setting build number to {new_build}')
+            execute(f'agvtool new-version -all {new_build}')
+        else:
+            logging.warning('No builds on App Store!')
 
+        logging.info('Checking App Store version...')
+        latest_version = self.getLatestVersion()
+        if latest_version:
+            latestSemanticVersion = SemanticVersion.fromString(latest_version.attributes.versionString)
+            projectSemanticVersion = SemanticVersion.fromString(self._get_version_number())
 
-    def increment_patch_number(self):
-        '''Increments the patch number of the project (e.g. 3.2.x)'''
-        execute(f'{fastlaneCommand} run increment_version_number bump_type:patch xcodeproj:"{self.config.app.project}"')
+            logging.info(f'App Store version is {latestSemanticVersion} ({latest_version.attributes.appStoreState}), project version is {projectSemanticVersion}')
 
+            needNewVersion = False
 
-    def increment_minor_version(self):
-        '''Increments the minor version of the project (e.g. 3.x.1)'''
-        execute(f'{fastlaneCommand} run increment_version_number bump_type:minor xcodeproj:"{self.config.app.project}"')
+            if projectSemanticVersion < latestSemanticVersion:
+                needNewVersion = True
+            
+            if projectSemanticVersion == latestSemanticVersion and latest_version.attributes.appStoreState != 'PREPARE_FOR_SUBMISSION':
+                needNewVersion = True
 
+            if needNewVersion:
+                newVersion = input('Enter new version: ')
+                execute(f'agvtool new-marketing-version -all {newVersion}')
+            else:
+                logging.info('Versions good.')
 
-    def increment_major_version(self):
-        '''Increments the major version of the project (e.g. x.2.1)'''
-        execute(f'{fastlaneCommand} run increment_version_number bump_type:major xcodeproj:"{self.config.app.project}"')
+        else:
+            logging.warning('No versions on App Store!')
 
 
     def build_ipa(self):
@@ -211,17 +278,20 @@ class App:
         else:
             workspaceParam = ''
 
-        execute(f'{fastlaneCommand} gym {workspaceParam} --scheme "{self.config.app.scheme}"')
-        #
-        # derived_data_dir = os.path.join(os.getenv('HOME'), '.cache/pyfastlane/', self.temp_dir_name)
-        # os.makedirs(derived_data_dir, exist_ok=True)
-        #
-        # execute(f'xcodebuild -workspace {self.config.app.workspace} -scheme {self.config.app.scheme} -derivedDataPath {derived_data_dir} -destination \'generic/platform=iOS\' build')
+        derived_data_dir = './build/'
+        os.makedirs(derived_data_dir, exist_ok=True)
+
+        # Builds the app into an archive
+        execute(f'xcodebuild -workspace {self.config.app.workspace} -scheme {self.config.app.scheme} -destination \'generic/platform=iOS\' -archivePath ./build/{self.config.app.scheme}.xcarchive archive')
+
+        # Exports the archive according to the export options specified by the plist
+        open('./build/ExportOptions.plist', 'w').write('<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict>  <key>method</key><string>app-store</string></dict></plist>')
+        execute(f'xcodebuild -exportArchive -archivePath ./build/{self.config.app.scheme}.xcarchive -exportPath ./build/ -exportOptionsPlist ./build/ExportOptions.plist')
 
 
     def upload_binary(self):
         '''Uploads the .ipa file to App Store Connect'''
-        execute(f'{fastlaneCommand} deliver {self.deliver_options} --skip_screenshots --skip_metadata')
+        execute(f'{fastlaneCommand} deliver {self.deliver_options} --ipa ./build/{self.config.app.scheme}.ipa --skip_screenshots --skip_metadata')
         self.tag_commit(self._get_version_number())
 
 
@@ -246,7 +316,7 @@ class App:
     def testflight(self):
         '''Increments build number, builds the .ipa file, then uploads the .ipa file to TestFlight'''
         self.ensure_git_clean()
-        self.increment_build_number()
+        self.version_check()
         self.build_ipa()
         self.upload_binary()
 
