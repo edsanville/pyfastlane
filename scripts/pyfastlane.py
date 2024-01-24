@@ -274,7 +274,7 @@ class App:
     def build_ipa(self):
         '''Builds the .ipa file'''
         if self.config.app.workspace is not None:
-            workspaceParam = f'--workspace {self.config.app.workspace}'
+            workspaceParam = f'-workspace {self.config.app.workspace}'
         else:
             workspaceParam = ''
 
@@ -282,16 +282,37 @@ class App:
         os.makedirs(derived_data_dir, exist_ok=True)
 
         # Builds the app into an archive
-        execute(f'xcodebuild -workspace {self.config.app.workspace} -scheme {self.config.app.scheme} -destination \'generic/platform=iOS\' -archivePath ./build/{self.config.app.scheme}.xcarchive archive')
+        execute(f'xcodebuild {workspaceParam} -scheme {self.config.app.scheme} -destination \'generic/platform=iOS\' -archivePath ./build/{self.config.app.scheme}.xcarchive archive')
 
         # Exports the archive according to the export options specified by the plist
         open('./build/ExportOptions.plist', 'w').write('<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict>  <key>method</key><string>app-store</string></dict></plist>')
         execute(f'xcodebuild -exportArchive -archivePath ./build/{self.config.app.scheme}.xcarchive -exportPath ./build/ -exportOptionsPlist ./build/ExportOptions.plist')
 
+    
+    def ipaPath(self):
+        return f'./build/{self.config.app.scheme}.ipa'
+
 
     def upload_binary(self):
         '''Uploads the .ipa file to App Store Connect'''
-        execute(f'{fastlaneCommand} deliver {self.deliver_options} --ipa ./build/{self.config.app.scheme}.ipa --skip_screenshots --skip_metadata')
+        # xcrun altool --upload-package  file_path --type  {macos | ios | appletvos} --asc-public-id  id 
+        # --apple-id id --bundle-version version --bundle-short-version-string string --bundle-id id {-u  username [-p  password] | --apiKey api_key --apiIssuer  issuer_id}
+        params = [
+            'xcrun altool',
+            '--upload-package', self.ipaPath(),
+            '--type', 'ios',
+            '--asc-public-id', '69a6de6f-82da-47e3-e053-5b8c7c11a4d1',
+            '--apple-id', self.config.app.app_id,
+            '--bundle-version', self._get_build_number(),
+            '--bundle-short-version-string', self._get_version_number(),
+            '--bundle-id', self.config.app.bundle_id,
+            '--apiKey', '7XV5Z5SNX8',
+            '--apiIssuer', '69a6de6f-82da-47e3-e053-5b8c7c11a4d1'
+        ]
+
+        commandString = ' '.join(params)
+
+        execute(commandString)
         self.tag_commit(self._get_version_number())
 
 
