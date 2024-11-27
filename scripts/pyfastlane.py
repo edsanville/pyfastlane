@@ -8,7 +8,6 @@ import argparse
 import os.path
 import subprocess
 import logging
-import pytz
 
 import appPublish
 import appstoreconnect
@@ -40,7 +39,12 @@ def git_is_clean():
     logging.info(cmd)
     try:
         proc = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE)
-        return len(proc.stdout.readlines()) == 0
+        lines = proc.stdout.readlines()
+        if len(lines) > 0:
+            logging.warning('output:')
+        for line in lines:
+            logging.warning(line.decode().strip())
+        return len(lines) == 0
     except FileNotFoundError as e:
         logging.error(e)
         exit(1)
@@ -142,8 +146,6 @@ class App:
             'upload_screenshots': self.upload_screenshots,
             'replace_screenshots': self.replace_screenshots,
             'testflight': self.testflight,
-            'submit': self.submit,
-            'release': self.release,
             'snapshot': self.snapshot,
             'help': self.help
         }
@@ -167,12 +169,12 @@ class App:
             version_string = line[line.rfind('=') + 1:].strip()
             return version_string
 
-    def _get_build_number(self):
+    def getProjectBuildNumber(self) -> int:
         cmd = 'agvtool what-version -terse'.split()
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
         for lineBytes in proc.stdout:
-            version_string = lineBytes.decode().strip()
-            return version_string
+            versionNumber = int(lineBytes.decode().strip())
+            return versionNumber
 
 
     def ensure_git_clean(self):
@@ -186,7 +188,7 @@ class App:
         execute(f'git tag -f {tag_name}')
 
 
-    def getLatestBuild(self):
+    def getLatestAppStoreBuild(self):
         builds = self.session.get_builds(self.config.app.app_id)
         try:
             return max(builds, key=lambda b: b.attributes.uploadedDate)
@@ -194,7 +196,7 @@ class App:
             return None
 
 
-    def getLatestVersion(self):
+    def getLatestAppStoreVersion(self):
         versions = self.session.get_appStoreVersions(self.config.app.app_id)
         try:
             return max(versions, key=lambda version: version.attributes.createdDate)
@@ -213,9 +215,9 @@ class App:
 
         print(f'{"":15s} {"Version":12s} {"Date":25s} {"Build":12s} {"Date":25s}')
 
-        print(f'{"Project":15s} {self._get_version_number():12s} {"":25s} {self._get_build_number():12s}')
+        print(f'{"Project":15s} {self._get_version_number():12s} {"":25s} {self.getProjectBuildNumber():12s}')
 
-        latest_build = self.getLatestBuild()
+        latest_build = self.getLatestAppStoreBuild()
         if latest_build:
             app_store_build = latest_build.attributes.version
             app_store_build_date = localTimeString(latest_build.attributes.uploadedDate)
@@ -223,7 +225,7 @@ class App:
             app_store_build = 'None'
             app_store_build_date = ''
 
-        latest_version = self.getLatestVersion()
+        latest_version = self.getLatestAppStoreVersion()
         if latest_version:
             app_store_version = latest_version.attributes.versionString
             app_store_version_date = localTimeString(latest_version.attributes.createdDate)
@@ -237,33 +239,36 @@ class App:
     def version_check(self):
         '''Checks to make sure the project's version settings are up-to-date'''
         logging.info('Checking App Store build...')
-        latest_build = self.getLatestBuild()
-        if latest_build:
-            new_build = int(latest_build.attributes.version) + 1
-            logging.info(f'App Store build is {latest_build.attributes.version}, setting build number to {new_build}')
-            execute(f'agvtool new-version -all {new_build}')
+        latestAppStoreBuild = self.getLatestAppStoreBuild()
+        projectBuildNumber = self.getProjectBuildNumber()
+
+        if latestAppStoreBuild:
+            latestAppStoreBuildNumber = int(latestAppStoreBuild.attributes.version)
+            newBuildNumber = max(projectBuildNumber, latestAppStoreBuildNumber + 1)
+            logging.info(f'App Store build is {latestAppStoreBuildNumber}, setting build number to {newBuildNumber}')
+            execute(f'agvtool new-version -all {newBuildNumber}')
         else:
             logging.warning('No builds on App Store!')
 
         logging.info('Checking App Store version...')
-        latest_version = self.getLatestVersion()
-        if latest_version:
-            latestSemanticVersion = SemanticVersion.fromString(latest_version.attributes.versionString)
+        latestAppStoreVersion = self.getLatestAppStoreVersion()
+        if latestAppStoreVersion:
+            latestSemanticVersion = SemanticVersion.fromString(latestAppStoreVersion.attributes.versionString)
             projectSemanticVersion = SemanticVersion.fromString(self._get_version_number())
 
-            logging.info(f'App Store version is {latestSemanticVersion} ({latest_version.attributes.appStoreState}), project version is {projectSemanticVersion}')
+            logging.info(f'App Store version is {latestSemanticVersion} ({latestAppStoreVersion.attributes.appStoreState}), project version is {projectSemanticVersion}')
 
-            needNewVersion = False
-
-            if projectSemanticVersion < latestSemanticVersion:
+            if projectSemanticVersion > latestSemanticVersion:
+                needNewVersion = False
+            elif projectSemanticVersion < latestSemanticVersion:
                 needNewVersion = True
-            
-            if projectSemanticVersion == latestSemanticVersion and latest_version.attributes.appStoreState != 'PREPARE_FOR_SUBMISSION':
-                needNewVersion = True
+            else:
+                UPLOADABLE_STATES = ['PREPARE_FOR_SUBMISSION', 'INVALID_BINARY']
+                needNewVersion = (latestAppStoreVersion.attributes.appStoreState not in UPLOADABLE_STATES)
 
             if needNewVersion:
                 newVersion = input('Enter new version: ')
-                execute(f'agvtool new-marketing-version -all {newVersion}')
+                execute(f'agvtool new-marketing-version {newVersion}')
             else:
                 logging.info('Versions good.')
 
@@ -303,8 +308,8 @@ class App:
             '--type', 'ios',
             '--asc-public-id', '69a6de6f-82da-47e3-e053-5b8c7c11a4d1',
             '--apple-id', self.config.app.app_id,
-            '--bundle-version', self._get_build_number(),
-            '--bundle-short-version-string', self._get_version_number(),
+            '--bundle-version', str(self.getProjectBuildNumber()),
+            '--bundle-short-version-string', str(self._get_version_number()),
             '--bundle-id', self.config.app.bundle_id,
             '--apiKey', '7XV5Z5SNX8',
             '--apiIssuer', '69a6de6f-82da-47e3-e053-5b8c7c11a4d1'
@@ -341,18 +346,6 @@ class App:
         self.build_ipa()
         self.upload_binary()
 
-
-    def submit(self):
-        '''Submits the latest build for the latest version number on App Store Connect'''
-        execute(f'{fastlaneCommand} deliver submit_build {self.deliver_options} --skip_screenshots --skip_metadata', silent=False)
-
-
-    def release(self):
-        '''Increments build number, builds the .ipa file, uploads the metadata and .ipa file, and submits for release on App Store Connect'''
-        self.increment_build_number()
-        self.build_ipa()
-        execute(f'{fastlaneCommand} deliver {self.deliver_options} --submit_for_review --skip_screenshots')
-        self.tag_commit(self._get_version_number())
 
     def snapshot(self):
         '''Capture screenshots using Snapshot'''
