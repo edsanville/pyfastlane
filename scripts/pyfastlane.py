@@ -247,6 +247,7 @@ class App:
             newBuildNumber = max(projectBuildNumber, latestAppStoreBuildNumber + 1)
             logging.info(f'App Store build is {latestAppStoreBuildNumber}, setting build number to {newBuildNumber}')
             execute(f'agvtool new-version -all {newBuildNumber}')
+            git_commit(f'Bump to build {newBuildNumber}')
         else:
             logging.warning('No builds on App Store!')
 
@@ -269,6 +270,7 @@ class App:
             if needNewVersion:
                 newVersion = input('Enter new version: ')
                 execute(f'agvtool new-marketing-version {newVersion}')
+                git_commit(f'Bump to version {newVersion}')
             else:
                 logging.info('Versions good.')
 
