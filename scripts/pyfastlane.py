@@ -215,7 +215,7 @@ class App:
 
         print(f'{"":15s} {"Version":12s} {"Date":25s} {"Build":12s} {"Date":25s}')
 
-        print(f'{"Project":15s} {self._get_version_number():12s} {"":25s} {self.getProjectBuildNumber():12s}')
+        print(f'{"Project":15s} {self._get_version_number():12s} {"":25s} {self.getProjectBuildNumber():12d}')
 
         latest_build = self.getLatestAppStoreBuild()
         if latest_build:
