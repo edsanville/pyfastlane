@@ -51,6 +51,9 @@ def git_is_clean():
 
 
 def git_commit(msg):
+    if git_is_clean():
+        logging.info('No changes to commit.')
+        return
     execute(f'git commit -a -m "{msg}"')
 
 
