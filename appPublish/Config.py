@@ -8,6 +8,8 @@ class AppConfig:
     scheme: str
     app_id: int
     bundle_id: str
+    uses_encryption: bool = False
+    uses_idfa: bool = False
 
 
 @dataclass

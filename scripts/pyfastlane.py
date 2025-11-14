@@ -39,6 +39,7 @@ def git_is_clean():
     logging.info(cmd)
     try:
         proc = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE)
+        assert(proc.stdout is not None)
         lines = proc.stdout.readlines()
         if len(lines) > 0:
             logging.warning('output:')
@@ -69,7 +70,7 @@ class SemanticVersion:
 
     @staticmethod
     def fromString(string: str):
-        parts = string.split('.')
+        parts = [int(part) for part in string.split('.')[:3]]
         return SemanticVersion(*parts)
     
     def __lt__(self, other: "SemanticVersion") -> bool:
@@ -99,7 +100,7 @@ class SemanticVersion:
 
 class App:
     config: appPublish.Config
-    session: appstoreconnect.Session
+    client: appstoreconnect.api1.Client
 
     def __init__(self, path: str):
         self.path = path
@@ -113,7 +114,6 @@ class App:
         config: appPublish.Config = DefaultMunch.fromDict(dict(parser))
         self.config = config
 
-        self.config.project_dir = os.path.dirname(self.config.app.project)
         self.temp_dir_name = get_filename_body(self.config.app.project) + '-' + self.config.app.scheme
 
         try:
@@ -153,7 +153,7 @@ class App:
             'help': self.help
         }
 
-        self.session = appstoreconnect.Session()
+        self.client = appstoreconnect.api1.Client()
 
 
     def doAction(self, action_name):
@@ -167,14 +167,16 @@ class App:
     def _get_version_number(self):
         cmd = 'agvtool what-marketing-version -terse'.split()
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+        assert(proc.stdout is not None)
         for lineBytes in proc.stdout:
             line = lineBytes.decode()
             version_string = line[line.rfind('=') + 1:].strip()
             return version_string
 
-    def getProjectBuildNumber(self) -> int:
+    def getProjectBuildNumber(self):
         cmd = 'agvtool what-version -terse'.split()
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+        assert(proc.stdout is not None)
         for lineBytes in proc.stdout:
             versionNumber = int(lineBytes.decode().strip())
             return versionNumber
@@ -192,16 +194,18 @@ class App:
 
 
     def getLatestAppStoreBuild(self):
-        builds = self.session.get_builds(self.config.app.app_id)
+        response = self.client.list_all_builds_of_an_app(str(self.config.app.app_id))
         try:
+            builds = response.data
             return max(builds, key=lambda b: b.attributes.uploadedDate)
         except:
             return None
 
 
     def getLatestAppStoreVersion(self):
-        versions = self.session.get_appStoreVersions(self.config.app.app_id)
+        response = self.client.list_all_app_store_versions_for_an_app(str(self.config.app.app_id))
         try:
+            versions = response.data
             return max(versions, key=lambda version: version.attributes.createdDate)
         except:
             return None
@@ -213,8 +217,8 @@ class App:
             DATE_FORMAT = '%Y-%m-%d %H:%M:%S %Z'
             return datetime.fromisoformat(isoString).astimezone().strftime(DATE_FORMAT)
 
-        session = appstoreconnect.Session()
-        latest_build: appstoreconnect.Build = None
+        client = appstoreconnect.api1.Client()
+        latest_build: appstoreconnect.api1.Build | None = None
 
         print(f'{"":15s} {"Version":12s} {"Date":25s} {"Build":12s} {"Date":25s}')
 
@@ -244,6 +248,7 @@ class App:
         logging.info('Checking App Store build...')
         latestAppStoreBuild = self.getLatestAppStoreBuild()
         projectBuildNumber = self.getProjectBuildNumber()
+        assert(latestAppStoreBuild is not None and projectBuildNumber is not None)
 
         if latestAppStoreBuild:
             latestAppStoreBuildNumber = int(latestAppStoreBuild.attributes.version)
@@ -356,7 +361,7 @@ class App:
         '''Capture screenshots using Snapshot'''
         deviceList = ",".join(self.screenshot_devices)
 
-        derived_data_dir = os.path.join(os.getenv('HOME'), '.cache/pyfastlane/', self.temp_dir_name)
+        derived_data_dir = os.path.join(os.getenv('HOME') or '', '.cache/pyfastlane/', self.temp_dir_name)
         os.makedirs(derived_data_dir, exist_ok=True)
 
         # Build the app bundle once
