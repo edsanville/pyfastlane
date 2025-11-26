@@ -178,8 +178,9 @@ class App:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
         assert(proc.stdout is not None)
         for lineBytes in proc.stdout:
-            versionNumber = int(lineBytes.decode().strip())
+            versionNumber = lineBytes.decode().strip()
             return versionNumber
+        return ''
 
 
     def ensure_git_clean(self):
@@ -195,6 +196,7 @@ class App:
 
     def getLatestAppStoreBuild(self):
         response = self.client.list_all_builds_of_an_app(str(self.config.app.app_id))
+        response = self.client.depaginate(response)
         try:
             builds = response.data
             return max(builds, key=lambda b: b.attributes.uploadedDate)
@@ -204,6 +206,7 @@ class App:
 
     def getLatestAppStoreVersion(self):
         response = self.client.list_all_app_store_versions_for_an_app(str(self.config.app.app_id))
+        response = self.client.depaginate(response)
         try:
             versions = response.data
             return max(versions, key=lambda version: version.attributes.createdDate)
@@ -222,7 +225,7 @@ class App:
 
         print(f'{"":15s} {"Version":12s} {"Date":25s} {"Build":12s} {"Date":25s}')
 
-        print(f'{"Project":15s} {self._get_version_number():12s} {"":25s} {self.getProjectBuildNumber():12d}')
+        print(f'{"Project":15s} {self._get_version_number():12s} {"":25s} {self.getProjectBuildNumber():12s}')
 
         latest_build = self.getLatestAppStoreBuild()
         if latest_build:
